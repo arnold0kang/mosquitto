@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Test whether a PUBLISH to a topic with an offline subscriber results in a queued message
 import Queue
@@ -17,26 +17,22 @@ except ImportError:
     exit(0)
 
 
-import inspect, os, sys
-# From http://stackoverflow.com/questions/279237/python-import-a-module-from-a-folder
-cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0],"..")))
-if cmd_subfolder not in sys.path:
-    sys.path.insert(0, cmd_subfolder)
-
-import mosq_test
+from mosq_test_helper import *
 
 rc = 1
+
+port = mosq_test.get_port()
 
 def registerOfflineSubscriber():
     """Just a durable client to trigger queuing"""
     client = paho.mqtt.client.Client("sub-qos1-offline", clean_session=False)
-    client.connect("localhost", port=1888)
+    client.connect("localhost", port=port)
     client.subscribe("test/publish/queueing/#", 1)
     client.loop()
     client.disconnect()
 
 
-broker = mosq_test.start_broker(filename=os.path.basename(__file__))
+broker = mosq_test.start_broker(filename=os.path.basename(__file__), port=port)
 
 class BrokerMonitor(threading.Thread):
     def __init__(self, group=None, target=None, name=None, args=(), kwargs=None, verbose=None):
@@ -57,7 +53,7 @@ class BrokerMonitor(threading.Thread):
 
     def run(self):
         client = paho.mqtt.client.Client("broker-monitor")
-        client.connect("localhost", port=1888)
+        client.connect("localhost", port=port)
         client.message_callback_add("$SYS/broker/store/messages/count", self.store_count)
         client.message_callback_add("$SYS/broker/store/messages/bytes", self.store_bytes)
         client.message_callback_add("$SYS/broker/publish/messages/dropped", self.publish_dropped)
@@ -126,7 +122,7 @@ try:
     msgs_short10 = [("test/publish/queueing/%d" % x,
              ''.join(random.choice(string.hexdigits) for _ in range(10)),
              1, False) for x in range(1, 10 + 1)]
-    paho.mqtt.publish.multiple(msgs_short10, port=1888)
+    paho.mqtt.publish.multiple(msgs_short10, port=port)
     counts.update(rq.get())  # Initial start
     print("rq.get (short) gave us: ", counts)
     rq.task_done()
@@ -141,7 +137,7 @@ try:
     msgs_medium10 = [("test/publish/queueing/%d" % x,
              ''.join(random.choice(string.hexdigits) for _ in range(40)),
              1, False) for x in range(1, 10 + 1)]
-    paho.mqtt.publish.multiple(msgs_medium10, port=1888)
+    paho.mqtt.publish.multiple(msgs_medium10, port=port)
     counts.update(rq.get())  # Initial start
     print("rq.get (medium) gave us: ", counts)
     rq.task_done()
@@ -151,6 +147,8 @@ try:
         raise ValueError
     rc = 0
 
+except mosq_test.TestError:
+    pass
 finally:
     cq.put("quit")
     brokerMonitor.join()
@@ -159,7 +157,7 @@ finally:
     broker.terminate()
     (stdo, stde) = broker.communicate()
     if rc:
-        print(stde)
+        print(stde.decode('utf-8'))
 
 exit(rc)
 

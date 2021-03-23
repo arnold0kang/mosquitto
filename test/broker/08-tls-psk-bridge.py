@@ -1,22 +1,10 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-import subprocess
-import ssl
-import sys
-import time
+from mosq_test_helper import *
 
 if sys.version < '2.7':
     print("WARNING: SSL not supported on Python 2.6")
     exit(0)
-
-
-import inspect, os
-# From http://stackoverflow.com/questions/279237/python-import-a-module-from-a-folder
-cmd_subfolder = os.path.realpath(os.path.abspath(os.path.join(os.path.split(inspect.getfile( inspect.currentframe() ))[0],"..")))
-if cmd_subfolder not in sys.path:
-    sys.path.insert(0, cmd_subfolder)
-
-import mosq_test
 
 def write_config1(filename, port1, port2):
     with open(filename, 'w') as f:
@@ -32,6 +20,7 @@ def write_config1(filename, port1, port2):
 def write_config2(filename, port2, port3):
     with open(filename, 'w') as f:
         f.write("port %d\n" % (port3))
+        f.write("allow_anonymous true\n")
         f.write("\n")
         f.write("connection bridge-psk\n")
         f.write("address localhost:%d\n" % (port2))
@@ -72,17 +61,20 @@ bridge = mosq_test.start_broker(filename=os.path.basename(__file__)+'_bridge', c
 pub = None
 try:
     sock = mosq_test.do_client_connect(connect_packet, connack_packet, timeout=30, port=port1)
-    sock.send(subscribe_packet)
 
-    if mosq_test.expect_packet(sock, "suback", suback_packet):
-        pub = subprocess.Popen(['./c/08-tls-psk-bridge.test', str(port3)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if pub.wait():
-            raise ValueError
-        (stdo, stde) = pub.communicate()
+    mosq_test.do_send_receive(sock, subscribe_packet, suback_packet, "suback")
 
-        if mosq_test.expect_packet(sock, "publish", publish_packet):
-            rc = 0
+    pub = subprocess.Popen(['./c/08-tls-psk-bridge.test', str(port3)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if pub.wait():
+        raise ValueError
+    (stdo, stde) = pub.communicate()
+
+    mosq_test.expect_packet(sock, "publish", publish_packet)
+    rc = 0
+
     sock.close()
+except mosq_test.TestError:
+    pass
 finally:
     os.remove(conf_file1)
     os.remove(conf_file2)
@@ -94,12 +86,12 @@ finally:
     bridge.wait()
     (stdo, stde) = broker.communicate()
     if rc:
-        print(stde)
+        print(stde.decode('utf-8'))
         (stdo, stde) = bridge.communicate()
-        print(stde)
+        print(stde.decode('utf-8'))
         if pub:
             (stdo, stde) = pub.communicate()
-            print(stdo)
+            print(stdo.decode('utf-8'))
 
 exit(rc)
 
